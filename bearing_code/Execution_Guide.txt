@@ -1,0 +1,426 @@
+﻿GAT-BiLSTM Experimental Code Execution Guide
+===========================================
+
+1. Overall execution workflow
+
+The recommended workflow is:
+
+Install dependencies and check the environment
+        ->
+Run synthetic-data checks (not paper results)
+        ->
+01_preprocess.py: preprocess the actual data and save caches
+        ->
+run_experiments.py: model comparison, module ablation, and feature ablation
+        ->
+Complete all training and validation, then freeze configurations and checkpoints
+        ->
+Perform final testing and calculate per-seed scores, means, and sample SDs
+        ->
+Save result tables and the requested column-normalized confusion matrices
+        ->
+06_compute_cost.py: computational-cost profiling
+
+Run this workflow separately for the laboratory and Ottawa datasets.
+Do not combine the two datasets for training.
+
+The numbers 01-06 organize the code by function; they do not mean that all six
+scripts must be executed sequentially once each. The run_experiments.py driver
+already includes the full model, model comparison, module ablation, and feature
+ablation. After using this driver, do not repeat scripts 02-05 for the same set
+of formal experiments.
+
+
+2. Purpose of each file
+
+01_preprocess.py
+    Read CSV/MAT files, partition training/validation/test data, fit training-only
+    normalization, generate windows, and compute FFT representations.
+
+02_gat_bilstm.py
+    Train and test the full GAT-BiLSTM separately. This can also check whether
+    training works with the actual data before starting formal experiments.
+
+03_compare_models.py
+    Compare SVM, Transformer, CNN-BiLSTM, CNN-BiGRU, ResNet, 1D-CNN, GAT,
+    MHGAT, and the full model.
+
+04_module_ablation.py
+    Evaluate the full model, GNN-BiLSTM, BiLSTM, and LSTM.
+
+05_feature_ablation.py
+    Evaluate joint time-frequency, time-only, and frequency-only inputs.
+
+06_compute_cost.py
+    Load trained models and measure parameter counts, major-arithmetic FLOPs,
+    inference time, and CUDA memory usage.
+
+run_experiments.py
+    Recommended driver for formal experiments. Complete training and validation
+    for model comparison and both ablation suites before final testing.
+
+The complete underlying implementations are in the bearing directory.
+The entry-point scripts call them; the underlying files need not be run separately.
+
+
+3. Enter the project directory and install dependencies
+
+Execute the following commands in a Linux terminal, not in Windows Notepad.
+After extracting the package, enter the bearing_code directory containing
+01_preprocess.py and requirements.txt. Replace the example directory in the
+first command with the actual extraction location.
+
+cd /your/actual/path/bearing_code
+python -m pip install -r requirements.txt
+
+Check PyTorch and GPU availability:
+
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+
+True indicates that PyTorch recognizes CUDA. If the result is False, check
+whether the GPU-enabled PyTorch installation and driver are compatible.
+For CPU-only checks, replace cuda with cpu in subsequent commands.
+Full-record graph and attention computation may be slow on the CPU.
+
+
+4. Run the synthetic-data checks first
+
+python smoke_test.py
+python test_preprocessing.py
+
+These scripts check model forward/backward computation, five-seed training and
+testing, confusion matrices, CSV/MAT loading, and data partitioning.
+They use synthetic data, not the actual experimental data for the paper.
+Synthetic outputs are stored in smoke_artifacts. Do not report their accuracy,
+F1-score, or timing values as paper results.
+
+
+5. Check the actual data paths
+
+Open configs/data.json and confirm that the paths match the Linux machine.
+
+Laboratory dataset:
+    Five class-specific CSV files at 1200 rpm and 0% load under /root/SJJ/data1/.
+    Skip the first five rows, read only the first four columns, and use the
+    first column as the model input. This follows the latest five-row setting,
+    rather than the older example that skipped sixteen rows.
+    The 1800 rpm / 50% files are listed in the configuration but are not used
+    in the current experiments.
+    For spaces in Ball filenames, the reader attempts a unique match after
+    removing whitespace. If the file is still not found, update the configuration.
+
+Ottawa dataset:
+    The five class directories are under the following actual filesystem path:
+    /root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/
+    Use numerical vibration arrays from Channel_1. The current experiment
+    uses only the increasing-speed condition A.
+
+The non-ASCII directory characters above are shown as Unicode escapes.
+In configs/data.json, the JSON reader automatically decodes these escapes
+into the original directory names. Do not rename the actual data directories.
+Loading failures raise errors instead of returning fabricated all-zero data.
+
+
+6. Preprocess the laboratory dataset
+
+python 01_preprocess.py --dataset laboratory --output cache/laboratory
+
+Processing steps:
+1. Read one 1200 rpm / 0% record for each of the five bearing states.
+2. Use 1,024,000 samples per record at a sampling frequency of 10,240 Hz.
+3. Set temporal boundaries at 60% and 80% of each record.
+4. Remove 0.5 seconds on each side of each boundary, creating a one-second gap.
+5. Generate windows separately within the retained training, validation, and
+   test intervals, using a window length and stride of 1,024 samples.
+6. Each record yields 595 training, 190 validation, and 195 test windows.
+7. The five records yield 2,975 training, 950 validation, and 975 test windows.
+
+Fit normalization using retained training intervals only. The preprocessing
+order and actual parameters are saved in the cache metadata.
+Different temporal segments of the same recording enter different subsets.
+This is a within-record evaluation; temporal separation does not establish
+independent-bearing evaluation.
+
+
+7. Preprocess the Ottawa dataset
+
+First scan the actual files and generate a manifest containing their paths:
+
+python 01_preprocess.py --scan-ottawa configs/ottawa_files.csv
+
+Then preprocess the data:
+
+python 01_preprocess.py --dataset ottawa --mapping configs/ottawa_files.csv --output cache/ottawa
+
+The fixed increasing-speed partition is:
+
+State               Training        Validation      Test
+Ball fault B        B-A-1           B-A-2           B-A-3
+Combined fault C    C-A-1           C-A-2           C-A-3
+Healthy H           H-A-1           H-A-2           H-A-3
+Inner-race fault I  I-A-1           I-A-2           I-A-3
+Outer-race fault O  O-A-1           O-A-2           O-A-3
+
+Each record contains 2,000,000 samples, producing 1,953 complete windows of
+1,024 samples; the remaining 128 samples are discarded.
+Each subset contains five complete records and 9,765 windows.
+Assign records before windowing; a recording never crosses subsets.
+
+configs/ottawa_split_plan.csv contains the predefined logical recording IDs.
+The scanned configs/ottawa_files.csv contains the actual file paths.
+By default, the code establishes recording-level separation. It does not infer
+physical bearing identities from the suffixes 1, 2, and 3.
+Once actual bearing_id values are supplied, use --grouping bearing to validate
+strict bearing-level grouping.
+
+
+8. Common internal preprocessing sequence
+
+Partition raw data
+    -> Fit the global mean and population standard deviation on training data only
+    -> Apply the same scaling parameters to every subset
+    -> Generate non-overlapping 1,024-sample windows
+    -> Remove the mean of each window
+    -> Apply a symmetric Hann window
+    -> Take the first 512 FFT amplitude bins, calculated as 2*abs(FFT)/1024
+    -> Save numerical time-domain and frequency-domain arrays
+
+The model does not read waveform screenshots, PNGs, or JPGs.
+Training loads only training and validation caches for model selection.
+Reading raw test files during preprocessing to create a test cache is distinct
+from using test data to fit transformations or select models.
+
+
+9. Optional one-epoch check using actual data
+
+python 02_gat_bilstm.py train --dataset laboratory --cache cache/laboratory --output runs/lab_check --device cuda --epochs 1 --no-tune
+
+This checks full-model training with the actual data and GPU, without automatically
+testing. It still runs all five seeds, but each training run has only one epoch.
+Do not treat these outputs as formal paper results.
+After this check succeeds, use a different output directory for formal experiments.
+
+
+10. Recommended commands for formal experiments
+
+Laboratory dataset:
+
+python run_experiments.py --dataset laboratory --cache cache/laboratory --output runs/laboratory --device cuda --final-test
+
+Ottawa dataset:
+
+python run_experiments.py --dataset ottawa --cache cache/ottawa --output runs/ottawa --device cuda --final-test
+
+Run the datasets sequentially to avoid competing for memory on the same GPU.
+
+--final-test automatically starts final testing only after all training and
+validation have finished. It does not test during hyperparameter selection
+or use the test set after every training epoch.
+To postpone testing, omit --final-test and run the test commands manually
+after training all models.
+
+
+11. Detailed execution order inside the driver
+
+Stage 1: Hyperparameter selection for model comparison
+    Use the same data partition for every model.
+    By default, evaluate nine candidates per model, with at most fifty epochs
+    per neural training run.
+    Fix the tuning seed at 42 and select configurations using validation Macro-F1.
+    Neural defaults search learning rate and weight decay; SVM searches C and gamma.
+    Save the actual candidates and selected configuration in tuning.json.
+
+Stage 2: Five-seed training for model comparison
+    Use the fixed seeds 6, 42, 102, 1010, and 2025.
+    Train each seed from scratch and calculate validation metrics each epoch.
+    Select the checkpoint with the highest validation Macro-F1, keeping the
+    earlier epoch when scores tie.
+    Save each run's validation accuracy, Macro-F1, predictions, and model.
+    Calculate the five-run validation means and sample standard deviations.
+
+Stage 3: Module ablation
+    Retrieve the full model's validation-selected configuration and save it
+    in ablation_locked_config.json.
+    Train the full model, GNN-BiLSTM, BiLSTM, and LSTM independently for all
+    five seeds using this configuration.
+    Preserve the controlled comparison; do not adjust ablations based on test results.
+
+Stage 4: Feature ablation
+    Inherit the same full-model configuration.
+    Train joint time-frequency, time-only, and frequency-only variants for five seeds.
+    Single-domain ablations retain downstream dimensions, set missing-branch
+    features to zero, and freeze that branch's encoder.
+
+Stage 5: Freeze the results
+    Save FREEZE.json and integrity checks for each experiment suite.
+    Retain five independent checkpoints; do not average weights or pick a best seed.
+
+Stage 6: Final testing
+    Load the frozen checkpoints for model comparison, module ablation, and
+    feature ablation, in that order.
+    Evaluate each seed's checkpoint once on the test set.
+    Calculate each run's test accuracy and Macro-F1, followed by the means
+    and sample standard deviations across the five runs.
+    Save raw predictions and confusion matrices.
+
+The default testing procedure does not retrain the model or merge the training
+and validation sets for an additional training run.
+
+
+12. Metric calculations
+
+For each run:
+    Accuracy = correctly classified test windows / all test windows.
+    Macro-F1 = the mean of the five class-specific F1-scores, using the declared
+    zero_division=0 convention where a class has no predicted positives.
+
+Across five runs:
+    Mean accuracy = the arithmetic mean of the five seed-specific accuracies.
+    Mean Macro-F1 = the arithmetic mean of the five seed-specific Macro-F1 scores.
+    Standard deviation = sample standard deviation, with denominator 5-1.
+
+Calculate F1 separately for each run before averaging. Do not pool the five
+runs' predictions and calculate a single F1 as a replacement for the mean F1.
+CSV metrics range from 0 to 1. Multiply both means and standard deviations by
+100 when reporting percentages in the paper.
+Five random-seed repetitions are not five-fold cross-validation.
+
+
+13. Confusion-matrix generation
+
+Plots are generated automatically for the requested experiments:
+    Laboratory dataset: module ablation.
+    Ottawa dataset: model comparison.
+
+Each seed has raw confusion counts and a column-normalized matrix, with PNG
+and PDF plots. An additional plot sums the raw counts across five runs and
+then normalizes the resulting columns.
+The pooled plot is not a five-model voting ensemble; every test window is
+counted once per seed.
+
+Rows represent true classes; columns represent predicted classes.
+The column-normalized diagonal represents class-specific precision, not
+overall accuracy. A column with no predictions is displayed as zeros and
+identified in the metadata.
+Class order: D0 ball, D1 combined, D2 healthy, D3 inner-race, D4 outer-race.
+
+
+14. Locations of training and test results
+
+Laboratory dataset:
+    runs/laboratory/baseline/    Model comparison
+    runs/laboratory/module/      Module ablation
+    runs/laboratory/feature/     Feature ablation
+
+Ottawa dataset:
+    runs/ottawa/baseline/        Model comparison
+    runs/ottawa/module/          Module ablation
+    runs/ottawa/feature/         Feature ablation
+
+Important files in each suite:
+    validation_per_seed.csv     Validation accuracy and Macro-F1 for each seed
+    validation_summary.csv      Five-seed validation means and sample SDs
+    test_per_seed.csv           Final test scores for each seed
+    test_summary.csv            Five-seed final test means and sample SDs
+    FREEZE.json                 Frozen configurations and checkpoint information
+    TEST_COMPLETE.json          Test-completion marker
+
+Each model/seed_NUMBER/ directory contains a checkpoint, epochs.csv, prediction
+NPZ files, metric JSON files, and confusion-matrix data.
+Use test_summary.csv for formal test-performance reporting, not validation_summary.csv.
+
+
+15. Profile computational cost last
+
+Laboratory dataset:
+
+python 06_compute_cost.py --run runs/laboratory/baseline --cache cache/laboratory --output runs/laboratory/cost --device cuda
+
+Ottawa dataset:
+
+python 06_compute_cost.py --run runs/ottawa/baseline --cache cache/ottawa --output runs/ottawa/cost --device cuda
+
+Profiling procedure:
+1. Use the trained model for the predefined seed 6, without selecting a seed
+   based on test performance.
+2. Use validation records as timing inputs; no retraining is performed.
+3. Count parameters and major matrix-multiplication/convolution arithmetic FLOPs,
+   counting a multiply-add as two operations.
+4. By default, warm up ten times and repeat timing fifty times, synchronizing
+   the GPU at the timing boundaries.
+5. Report whole-record inference-time means and sample standard deviations.
+6. Divide whole-record time by the number of windows to obtain average time per window.
+7. Measure stages separately for diagnosis; do not sum instrumented stage times
+   and present the sum as measured whole-model latency.
+
+Common raw-signal preprocessing and device transfers are excluded from this
+inference-timing boundary. Model-specific encoding, graph construction,
+aggregation, attention, BiLSTM, classification, and Softmax are included.
+The FLOPs field counts major arithmetic operations, not every nonlinear,
+comparison, sorting, or memory operation. Their execution is still included
+in measured latency. SVM runs on the CPU; unavailable kernel FLOP counts are
+left blank rather than fabricated.
+
+Outputs:
+    cost_by_record.csv          Statistics for each model and validation record
+    cost_details.json           Detailed results, including stage-level measurements
+    profiling_protocol.json     Hardware, repeat counts, and measurement boundaries
+
+
+16. Running individual experiments instead of the driver
+
+This is an alternative route. Do not repeat the same experiments using both
+this route and the driver.
+
+Model comparison:
+python 03_compare_models.py train --dataset laboratory --cache cache/laboratory --output runs/lab_compare --device cuda
+
+Module ablation:
+python 04_module_ablation.py train --dataset laboratory --cache cache/laboratory --output runs/lab_modules --device cuda
+
+Feature ablation:
+python 05_feature_ablation.py train --dataset laboratory --cache cache/laboratory --output runs/lab_features --device cuda
+
+These individual entry points perform their own tuning by default.
+For controlled ablations, use the driver or add the following arguments to
+the individual ablation training commands:
+    --config actual/path/ablation_locked_config.json --no-tune
+
+After all training finishes, run testing:
+python 03_compare_models.py test --cache cache/laboratory --output runs/lab_compare --device cuda
+python 04_module_ablation.py test --cache cache/laboratory --output runs/lab_modules --device cuda
+python 05_feature_ablation.py test --cache cache/laboratory --output runs/lab_features --device cuda
+
+For Ottawa, change the dataset argument to ottawa and use separate Ottawa
+cache and output paths.
+
+
+17. Operational notes
+
+1. Training, caches, and test outputs have overwrite protection. Use new output
+   directories for deliberate reruns.
+2. Do not delete or replace a seed because its performance is poor.
+3. An encoder chunk size of 32 controls convolution work only. It does not set
+   the BiLSTM sequence length to 32. A complete record/segment remains one
+   sequence, with B=1.
+4. Full graphs and attention for 1,953-window Ottawa records require memory.
+   Do not silently reduce memory use by randomly splitting graphs, truncating
+   sequences, or mixing recordings.
+5. Baselines are explicitly defined reference implementations, not exact
+   reproductions of the cited authors' source code.
+6. The code reports actual parameter counts and calculated metrics rather than
+   forcing them to match old manuscript tables.
+7. Local synthetic-data CPU checks have passed. Actual Linux files and full
+   GPU training still require validation on the target machine.
+8. Preserve the full command and error message when an error occurs. Diagnose
+   the cause instead of substituting zero data or manually entered metrics.
+
+
+Frequently used execution sequence:
+
+Install dependencies
+    -> smoke_test.py and test_preprocessing.py
+    -> 01_preprocess.py
+    -> run_experiments.py --final-test
+    -> 06_compute_cost.py
+    -> Inspect test_summary.csv, confusion matrices, and cost_by_record.csv

@@ -1,0 +1,32 @@
+﻿START HERE
+==========
+
+This package contains all implementation files in their correct locations.
+Do not move the files inside bearing/ into the project root.
+Upload the entire bearing_code directory to your Linux machine.
+Run commands from the outer bearing_code directory.
+
+1. Install and check
+python -m pip install -r requirements.txt
+python smoke_test.py
+python test_preprocessing.py
+
+2. Prepare laboratory data
+python 01_preprocess.py --dataset laboratory --output cache/laboratory
+
+3. Prepare Ottawa data
+python 01_preprocess.py --scan-ottawa configs/ottawa_files.csv
+python 01_preprocess.py --dataset ottawa --mapping configs/ottawa_files.csv --output cache/ottawa
+
+4. Run formal experiments (CUDA required for these commands)
+python run_experiments.py --dataset laboratory --cache cache/laboratory --output runs/laboratory --device cuda --final-test
+python run_experiments.py --dataset ottawa --cache cache/ottawa --output runs/ottawa --device cuda --final-test
+
+5. Profile computational cost
+python 06_compute_cost.py --run runs/laboratory/baseline --cache cache/laboratory --output runs/laboratory/cost --device cuda
+python 06_compute_cost.py --run runs/ottawa/baseline --cache cache/ottawa --output runs/ottawa/cost --device cuda
+
+Check configs/data.json against your actual data locations first.
+Unicode escapes in JSON paths decode automatically to the original names.
+See Execution_Guide.txt for detailed instructions.
+No raw data, installed environment, or actual paper results are included.
