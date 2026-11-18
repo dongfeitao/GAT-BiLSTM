@@ -1,0 +1,39 @@
+{
+  "window_length": 1024,
+  "laboratory": {
+    "sampling_frequency": 10240,
+    "samples_per_record": 1024000,
+    "skip_rows": 5,
+    "channel_index": 0,
+    "gap_seconds": 1.0,
+    "files": {
+      "B": "/root/SJJ/data1/Ball_1200 _0.csv",
+      "C": "/root/SJJ/data1/Comb_1200_0.csv",
+      "H": "/root/SJJ/data1/Health_1200_0.csv",
+      "I": "/root/SJJ/data1/Inner_1200_0.csv",
+      "O": "/root/SJJ/data1/Outer_1200_0.csv"
+    },
+    "unused_other_condition_files": [
+      "/root/SJJ/data1/Ball_1800 _50.csv",
+      "/root/SJJ/data1/Comb_1800_50.csv",
+      "/root/SJJ/data1/Health_1800_50.csv",
+      "/root/SJJ/data1/Inner_1800_50.csv",
+      "/root/SJJ/data1/Outer_1800_50.csv"
+    ]
+  },
+  "ottawa": {
+    "sampling_frequency": 200000,
+    "samples_per_record": 2000000,
+    "channel": "Channel_1",
+    "condition": "A",
+    "grouping": "recording",
+    "manifest": null,
+    "directories": {
+      "H": "/root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/1 Data collected from a healthy bearing",
+      "I": "/root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/2 Data collected from a bearing with inner race fault",
+      "O": "/root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/3 Data collected from a bearing with outer race fault",
+      "B": "/root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/4 Data collected from a bearing with ball fault",
+      "C": "/root/SJJ/\u6e25\u592a\u534e/\u52a0\u62ff\u5927\u6e25\u592a\u534e\u5927\u5b66\u53d8\u5de5\u51b5\u632f\u52a8\u6570\u636e/v43hmbwxpm-2/5 Data collected from a bearing with a combination of faults"
+    }
+  }
+}
